@@ -207,6 +207,7 @@ button.primary:hover{filter:brightness(1.08)}
         <label for="maxF">Frutas dulces <select id="maxF"><option value="1">máx. 1</option><option value="2">máx. 2</option><option value="3">máx. 3</option></select></label>
         <label for="btSel">Grupo sanguíneo <select id="btSel"><option value="">Todos</option><option value="O">O</option><option value="A">A</option><option value="B">B</option><option value="AB">AB</option></select></label>
         <label for="secSel">Estado secretor <select id="secSel"><option value="sec">Secretor (o no lo sé)</option><option value="non">No secretor</option></select></label>
+        <label for="citrus"><input type="checkbox" id="citrus"> Más cítrico</label>
         <label for="notes"><input type="checkbox" id="notes"> Notas de piel y ecológico</label>
       </div>
       <div id="modeBox"></div>
@@ -821,12 +822,13 @@ function totals(inc, mult={}){
   return t;
 }
 
-function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, force:force0=[], lock=null, capS=20, capC=40}){
+function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, force:force0=[], lock=null, capS=20, capC=40, cmul={}}){
   // Una cantidad puesta a 0 a mano equivale a no tener el ingrediente
   const zero=[...have0].filter(id=>BY[id] && (mult[id]??1)<=0);
   const have=new Set([...have0].filter(id=>BY[id] && (mult[id]??1)>0));
   const autoM = {};   // cantidades que ajusta la propia app (fruta reducida para no pasar a ámbar)
-  const M = id => mult[id] ?? autoM[id] ?? 1;
+  // cmul: cantidades base de los cítricos con la opción «Más cítrico» (las elige citrusLevel)
+  const M = id => mult[id] ?? autoM[id] ?? cmul[id] ?? 1;
   const H = id => have.has(id);
   // Forzados: ingredientes que tienen que ir sí o sí (doble clic en la despensa)
   const force = new Set([...force0].filter(id=>have.has(id)));
@@ -946,7 +948,7 @@ function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, forc
   // Fruta desecada: una como máximo, nunca con melón o sandía y sin pasar de 25 g de azúcar por ración
   let nD=0;
   for(const i of byCap('D').sort((a,b)=>pinFirst(a,b)||a.pr-b.pr)){
-    const s = totals(inc,mult).sug + i.n[1]*i.gr*M(i.id)/100/2;
+    const s = totals(inc,{...cmul, ...mult}).sug + i.n[1]*i.gr*M(i.id)/100/2;
     const why = watery ? 'con melón o sandía se acumula demasiado azúcar rápido (X9)'
               : nD>=1 ? 'máx. 1 fruta desecada (X9)'
               : s>SUGAR_DRIED_MAX ? 'sube el azúcar por encima de '+SUGAR_DRIED_MAX+' g por ración (X9)' : null;
@@ -984,7 +986,7 @@ function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, forc
   // mitad de su cantidad; si no basta, se quita y se pasa a la siguiente.
   const trimmed=[];
   {
-    const MM = () => ({...autoM, ...mult});
+    const MM = () => ({...cmul, ...autoM, ...mult});
     const over = () => { const t=totals(inc,MM()); return t.sug>capS+1e-9 || t.cho>capC+1e-9; };
     const stepM = i => (i.u==='g'||i.u==='ml') ? (i.q>=100?10:i.q>=20?5:1)/i.q : 0.25;
     // Solo se recorta si quitando la fruta ajustable se llega a verde; si el exceso viene de otra cosa, no se toca la fruta
@@ -1023,7 +1025,7 @@ function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, forc
   const missing=roles.filter(r=>![...inc].some(id=>BY[id].t.includes(r.tag))).map(r=>r.tag);
 
   // Totales y avisos
-  const tot = totals(inc,{...autoM, ...mult});
+  const tot = totals(inc,{...cmul, ...autoM, ...mult});
   const warn=[...forceW,...pinW].map(txt=>({lvl:'hi',txt}));
   if(trimmed.length){
     const red=trimmed.filter(x=>x[1]>0), out=trimmed.filter(x=>x[1]===0);
@@ -1121,7 +1123,8 @@ function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, forc
     if(tot.k>1500) txt+=' Es mucho potasio para una toma: sin problema con riñones sanos, pero consúltalo si tienes enfermedad renal o tomas medicación que lo retiene.';
     warn.push({lvl:'info', txt});
   }
-  return {inc, excl, res, must, warn, prot, opts, cacaoOK, tot, ratio, liquids, zero, auto:autoM, missing};
+  const cUsed={}; for(const id in cmul) if(inc.has(id) && mult[id]===undefined) cUsed[id]=cmul[id];
+  return {inc, excl, res, must, warn, prot, opts, cacaoOK, tot, ratio, liquids, zero, auto:{...cUsed, ...autoM}, citrus:cUsed, missing};
 }
 // Sugerencias para compensar el azúcar sin perjudicar en nada más: más fibra soluble o proteína
 function suggest(input, r){
@@ -1327,7 +1330,10 @@ function finishTouch(input, r){
   if(!r || !r.inc.size) return null;
   const src=touchSources(new Set([...input.have].filter(id=>BY[id])));
   const z0=zones(r.tot, r.ratio);
-  let items=[src.juice, src.zest, src.spices[0], src.salt].filter(Boolean);
+  // Especia: la vainilla si la tienes (es la que más realza el dulzor); si no, la que no esté ya en la receta
+  // (por ejemplo, cardamomo cuando ya lleva canela); si no, la canela
+  const sp=src.spices.find(x=>x.src==='vainilla') || src.spices.find(x=>!r.inc.has(x.src)) || src.spices[0];
+  let items=[src.juice, src.zest, sp, src.salt].filter(Boolean);
   const dropped=[];
   // Si algo cambiara de color, se quita primero lo que más azúcar y carbohidratos suma
   for(let g=0; g<5; g++){
@@ -1345,6 +1351,31 @@ function finishTouch(input, r){
 // y con menos aguacate y legumbres (su hueco lo ocupa otra fuente de la despensa). Se prueban las combinaciones
 // de más a menos cambio y se queda la primera en la que ninguna casilla pasa a un color peor, no falta ninguna
 // compensación nueva y no aparece ningún aviso rojo nuevo.
+// Opción «Más cítrico»: sube la naranja (o mandarina) hasta el doble y el limón (o lima o zumo) hasta 1,5 veces su cantidad
+// base; la fruta dulce se recorta sola para no pasar de 20 g de azúcar ni de 40 g de carbohidratos. Se elige el mayor
+// aumento con el que ninguna casilla pasa a un color peor, no falta ninguna compensación y no aparece ningún aviso rojo nuevo.
+// No toca los cítricos forzados ni los que tienen la cantidad puesta a mano.
+function citrusLevel(input){
+  const base={...input, cmul:{}, lock:null}, r0=compute(base);
+  if(!r0.inc.size) return {};
+  const mult=input.mult||{}, force=new Set(input.force||[]);
+  const ok=id=>r0.inc.has(id) && mult[id]===undefined && !force.has(id);
+  const o=['naranja','mandarina'].find(ok), l=['limon','lima','zumo'].find(ok);
+  if(!o && !l) return {};
+  const z0=zones(r0.tot, r0.ratio), hi0=new Set(r0.warn.filter(w=>w.lvl==='hi').map(w=>w.txt));
+  const combos=[];
+  for(const a of (o?[2,1.75,1.5,1.25,1]:[1])) for(const b of (l?[1.5,1.25,1]:[1])) if(a>1||b>1) combos.push([a,b]);
+  combos.sort((x,y)=>(y[0]-1)*2+(y[1]-1) - ((x[0]-1)*2+(x[1]-1)));
+  for(const [a,b] of combos){
+    const cm={}; if(o&&a>1) cm[o]=a; if(l&&b>1) cm[l]=b;
+    const r=compute({...base, cmul:cm});
+    if(!noWorse(z0, zones(r.tot, r.ratio))) continue;
+    if((r.missing||[]).some(tg=>!(r0.missing||[]).includes(tg))) continue;
+    if(r.warn.some(w=>w.lvl==='hi' && !hi0.has(w.txt))) continue;
+    return cm;
+  }
+  return {};
+}
 // Cuánto le falta a cada casilla para volver a su color de partida (0 si ninguna está peor)
 const THR={kcal:['max',550,650,50], prot:['min',20,12,4], sug:['max',20,30,5], cho:['max',40,55,7.5], unsat:['min',5,-1,2], ala:['min',1.5,0.8,0.35], sat:['max',5,8,1.5], k:['min',875,525,100]};
 function viol(z0, t, ratio){
@@ -1379,19 +1410,26 @@ function flavorSafe(input, r0){
     // Con cantidades cambiadas a mano, lo que entra en lugar de lo quitado se decide sobre la receta sin esos cambios
     // El hueco para el zumo y la ralladura se hace recortando un poco la fruta, como ya hace la app con el azúcar
     const xs=[...(c.j?[src.juice]:[]), src.zest].filter(Boolean), xw=withExtras({sug:0,cho:0,fat:0,sat:0}, xs).tot;
-    const spMax=Math.max(0,...src.spices.map(x=>extraNut(x).sug||0)), spMaxC=Math.max(0,...src.spices.map(x=>extraNut(x).cho||0));
+    const spMax=src.spices.reduce((a,x)=>a+(extraNut(x).sug||0),0), spMaxC=src.spices.reduce((a,x)=>a+(extraNut(x).cho||0),0)+(have.has('canela')?ingPer('canela',BY.canela.gr/2).cho:0);
     let inp2={...input, have:have2, mult:m2, prot:r0.prot, capS:20-xw.sug-spMax, capC:40-xw.cho-spMaxC};
     if(input.lock){ const base=compute({...inp2, mult:half, lock:null}); inp2={...inp2, lock:base.inc}; }
     const rs=compute(inp2);
     if(!rs.inc.size) continue;
     if((rs.missing||[]).some(tg=>!(r0.missing||[]).includes(tg))) continue;
     if(rs.warn.some(w=>w.lvl==='hi' && !hi0.has(w.txt))) continue;
-    // Especia dulce: la primera disponible que no esté ya en la receta (si ya hay vainilla, canela y cardamomo, ninguna)
-    const sp=src.spices.find(x=>!rs.inc.has(x.src));
-    const items=[...(c.j?[src.juice]:[]), src.zest, sp, src.salt].filter(Boolean);
+    // Especias dulces: hasta completar 2 especias en la receta, se añaden por este orden la vainilla, el cardamomo y la
+    // canela que tengas y que no estén ya; y si la canela ya está en la receta, se sube hasta su máximo (de ½ a 1 cda la jarra).
+    // Si con la canela subida alguna casilla quedara peor, se prueba sin subirla.
+    const nE=[...rs.inc].filter(id=>BY[id].cap==='E').length;
+    const sps=['vainilla','cardamomo','canela'].map(id=>src.spices.find(x=>x.src===id)).filter(x=>x && !rs.inc.has(x.src)).slice(0, Math.max(0, 2-nE));
+    const items=[...(c.j?[src.juice]:[]), src.zest, ...sps, src.salt].filter(Boolean);
+    const canRaise = rs.inc.has('canela') && !force.has('canela') && mult.canela===undefined;
+    for(const cin of (canRaise?[true,false]:[false])){
     // Si alguna casilla quedaría peor (por ejemplo, el potasio al quitar aguacate), se intenta compensar subiendo
     // un poco otros ingredientes que ya están en la receta, sin pasar de su máximo prudente
-    let rv=rs, mv={...m2};
+    let mv={...m2}; if(cin) mv.canela=BY.canela.libre||2;
+    let rv=cin ? compute({...inp2, mult:mv}) : rs;
+    if(cin && [...rs.inc].some(x=>!rv.inc.has(x))) continue;
     const ev=rr=>{ const w=withExtras(rr.tot, items); return {w, v:viol(z0, w.tot, w.ratio)}; };
     let cur=ev(rv);
     for(let it=0; it<12 && cur.v>0; it++){
@@ -1411,15 +1449,16 @@ function flavorSafe(input, r0){
     if(cur.v>0) continue;
     const w=cur.w, z1=zones(w.tot, w.ratio);
     if(!noWorse(z0, z1)) continue;
-    const removed=[...rm].filter(id=>r0.inc.has(id)), added=[...rs.inc].filter(id=>!r0.inc.has(id)), gone=[...r0.inc].filter(id=>!rs.inc.has(id) && !rm.has(id));
+    const removed=[...rm].filter(id=>r0.inc.has(id));
     const raised=Object.keys(mv).filter(id=>mult[id]===undefined && half[id]===undefined).map(id=>[id, mv[id]]);
     const added2=[...rv.inc].filter(id=>!r0.inc.has(id)), gone2=[...r0.inc].filter(id=>!rv.inc.has(id) && !rm.has(id));
     const vmult={}; for(const id in mv) if(mult[id]===undefined) vmult[id]=mv[id];
     return {r:{...rv, tot:w.tot, ratio:w.ratio, flavor:true, vmult}, base:rv, items, removed, halved:Object.keys(half), raised, added:added2, gone:gone2, z0, z1, combo:c};
+    }
   }
   return null;
 }
-return {compute, totals, suggest, rebalance, penalty, shopping, zones, noWorse, withExtras, flatness, finishTouch, flavorSafe, touchSources, FLAT, BY, nm};
+return {compute, totals, suggest, rebalance, penalty, shopping, zones, noWorse, withExtras, flatness, finishTouch, flavorSafe, touchSources, citrusLevel, FLAT, BY, nm};
 }
 if (typeof module !== 'undefined') module.exports = { makeEngine };
 
@@ -1442,16 +1481,16 @@ const shopRank = id => { const k=SHOP.indexOf(id); return k<0 ? 999 : k; };
 const DEFAULT = ['naranja','limon','zanahoria','jengibre','manzana','frutosrojos','nueces','almendras','lino','chia','avena','proteina','te','cacao','aove','canela'];
 const TODAY = new Date().toDateString();
 let lastInp = null, lastRB = {}, shopCache = {key:null, res:null};
-let state = {mode:'base', have:new Set(DEFAULT), force:new Set(), lilaDone:{}, serv:2, prot:null, last:null, bt:'', sec:'sec', maxF:2, notes:true, ovr:{}, mixer:'jarra'};
+let state = {citrus:false, mode:'base', have:new Set(DEFAULT), force:new Set(), lilaDone:{}, serv:2, prot:null, last:null, bt:'', sec:'sec', maxF:2, notes:true, ovr:{}, mixer:'jarra'};
 try{ const s=JSON.parse(localStorage.getItem('batido-v2')||localStorage.getItem('batido-v1')||'null');
-  if(s){ state.have=new Set(s.have.filter(id=>BY[id])); state.force=new Set((s.force||[]).filter(id=>state.have.has(id))); state.lilaDone=(s.lilaDone&&typeof s.lilaDone==='object')?s.lilaDone:{}; state.serv=[1,2,3,4].includes(s.serv)?s.serv:2; state.mode=['base','toque','sabor'].includes(s.mode)?s.mode:'base'; state.bt=s.bt||''; state.sec=s.sec==='non'?'non':'sec'; state.maxF=s.maxF||2; state.notes=s.notes!==false; state.ovr=(s.ovr&&typeof s.ovr==='object')?Object.fromEntries(Object.entries(s.ovr).filter(([k,v])=>BY[k]&&typeof v==='number'&&v>=0)):{};
+  if(s){ state.have=new Set(s.have.filter(id=>BY[id])); state.force=new Set((s.force||[]).filter(id=>state.have.has(id))); state.lilaDone=(s.lilaDone&&typeof s.lilaDone==='object')?s.lilaDone:{}; state.serv=[1,2,3,4].includes(s.serv)?s.serv:2; state.mode=['base','toque','sabor'].includes(s.mode)?s.mode:'base'; state.citrus=s.citrus===true; state.bt=s.bt||''; state.sec=s.sec==='non'?'non':'sec'; state.maxF=s.maxF||2; state.notes=s.notes!==false; state.ovr=(s.ovr&&typeof s.ovr==='object')?Object.fromEntries(Object.entries(s.ovr).filter(([k,v])=>BY[k]&&typeof v==='number'&&v>=0)):{};
     if(s.day===TODAY){ state.prot=s.prot||null; state.last=s.last||null; }
     else { state.prot=null; state.last=s.used||s.prot||null;
       // Día nuevo: lo que se puso a 0 era para ese día; vuelve a la cantidad propuesta
       for(const k in state.ovr) if(state.ovr[k]===0) delete state.ovr[k]; } } }catch(e){}
 let used=null;
 try{ if(localStorage.getItem('batido-mixer')==='vaso') state.mixer='vaso'; }catch(e){}
-const save=()=>{ try{ localStorage.setItem('batido-v2',JSON.stringify({mode:state.mode,have:[...state.have],force:[...state.force],lilaDone:state.lilaDone,serv:state.serv,prot:state.prot,day:TODAY,last:state.last,used,bt:state.bt,sec:state.sec,maxF:state.maxF,notes:state.notes,ovr:state.ovr})) }catch(e){} };
+const save=()=>{ try{ localStorage.setItem('batido-v2',JSON.stringify({citrus:state.citrus,mode:state.mode,have:[...state.have],force:[...state.force],lilaDone:state.lilaDone,serv:state.serv,prot:state.prot,day:TODAY,last:state.last,used,bt:state.bt,sec:state.sec,maxF:state.maxF,notes:state.notes,ovr:state.ovr})) }catch(e){} };
 
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function frac(n){ const w=Math.floor(n), r=+(n-w).toFixed(3); const m={0.125:'⅛',0.25:'¼',0.375:'⅜',0.5:'½',0.625:'⅝',0.75:'¾',0.875:'⅞'}[r]; if(m) return (w?w:'')+m; return (Math.round(n*10)/10).toString().replace('.',','); }
@@ -1535,7 +1574,7 @@ function printHeader(){
   const labels={te:'té verde',cacao:'cacao',ninguno:'sin protagonista'};
   const d=new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
   const both=(lastR.inc.has('te')||lastR.inc.has('matcha')) && lastR.inc.has('cacao');
-  const md = lastMode.fsv ? ' · sabor seguro' : lastMode.ft ? ' · con toque final' : '';
+  const md = (state.citrus && Object.keys(lastMode.r0&&lastMode.r0.citrus||{}).length ? ' · más cítrico' : '') + (lastMode.fsv ? ' · sabor seguro' : lastMode.ft ? ' · con toque final' : '');
   return d.charAt(0).toUpperCase()+d.slice(1)+' · '+state.serv+(state.serv>1?' raciones':' ración')+' de 750 ml · '+(both?'té verde y cacao':labels[lastR.prot])+md;
 }
 const pdfSafe = s => s.replace(/≈/g,'aprox.').replace(/(\d)([⅓⅛⅜⅝⅞])/g,'$1 $2').replace(/⅓/g,'1/3').replace(/⅛/g,'1/8').replace(/⅜/g,'3/8').replace(/⅝/g,'5/8').replace(/⅞/g,'7/8').replace(/[^\x20-\x7E\u00A0-\u00FF€–—«»‘’“”…]/g,'');
@@ -1677,6 +1716,8 @@ function render(){
   // Receta propuesta sin cambios a mano: tras un cambio, nada que no estuviera en ella entra solo (lock),
   // y la fruta que había sirve de referencia para reponerla con otra si se quita a mano (fruitTarget)
   let inp={have:state.have, prot:state.prot, last:state.last, maxF:state.maxF, mult:state.ovr, force:state.force};
+  // «Más cítrico»: más naranja y limón en la receta, si ninguna casilla pasa a un color peor
+  if(state.citrus) inp={...inp, cmul:ENG.citrusLevel(inp)};
   if(Object.keys(state.ovr).length){
     const r0=ENG.compute({...inp, mult:{}});
     inp={...inp, lock:r0.inc, fruitTarget:[...r0.inc].filter(id=>BY[id].cap==='F').reduce((a,id)=>a+BY[id].gr*((r0.auto&&r0.auto[id])||1)/2,0)};
@@ -1800,6 +1841,11 @@ function render(){
   // Avisos, excluidos y reserva
   let ex='';
   const warns=[...r.warn];
+  if(state.citrus && r.inc.size){
+    const cu=Object.keys(r0.citrus||{});
+    if(cu.length) warns.push({lvl:'low', txt:'Más cítrico: '+cu.map(id=>ENG.nm(id)+' '+qty(BY[id],state.serv/2,r0.citrus[id],false)+' en vez de '+qty(BY[id],state.serv/2,1,false)).join(' y ')+' (la fruta dulce se ha recortado para no pasar de azúcar). El batido es algo más ácido: para cuidar el esmalte, tómalo de una vez y no a sorbos durante mucho rato, enjuágate la boca con agua al terminar y espera 30–60 minutos antes de cepillarte los dientes.'});
+    else warns.push({lvl:'low', txt:'Más cítrico: con lo que hay hoy no se puede subir el cítrico sin que alguna casilla pase a un color peor (o el cítrico lo has fijado tú), así que se mantiene la cantidad de siempre.'});
+  }
   if(mode!=='sabor' && r.inc.size){ const fl=ENG.flatness(r0); if(fl.score>=3) warns.push({lvl:'low', txt:'Puede saber plano por '+fl.reasons.join('; ')+'. Para mejorarlo sin dejar de ser saludable, prueba arriba «Toque final 2.ª ración» o «Sabor seguro».'}); }
   if(warns.length && r.inc.size){
     const order={hi:0,mid:1,low:2,info:3};
@@ -1807,7 +1853,7 @@ function render(){
   }
   // Recomendaciones de compra: solo si con lo que hay no se puede llegar a todo en verde
   if(r.inc.size){
-    const key=JSON.stringify([[...state.have].sort(), state.ovr, state.prot, state.maxF, [...state.force].sort(), state.serv]);
+    const key=JSON.stringify([[...state.have].sort(), state.ovr, state.prot, state.maxF, [...state.force].sort(), state.serv, state.citrus]);
     if(shopCache.key!==key) shopCache={key, res:ENG.shopping(inp, i=>stepOf(i,f0)/(i.q*f0), shopRank)};
     const sh=shopCache.res;
     if(sh.list.length){
@@ -1828,6 +1874,7 @@ function render(){
   document.getElementById('btSel').value=state.bt;
   document.getElementById('secSel').value=state.sec;
   document.getElementById('notes').checked=state.notes;
+  document.getElementById('citrus').checked=state.citrus;
 }
 
 let lastTap={id:null,t:0}, tapTimer=null;
@@ -1854,6 +1901,7 @@ document.getElementById('mixer').addEventListener('change',e=>{ state.mixer=e.ta
 document.getElementById('btSel').addEventListener('change',e=>{ state.bt=e.target.value; save(); render(); });
 document.getElementById('secSel').addEventListener('change',e=>{ state.sec=e.target.value; save(); render(); });
 document.getElementById('notes').addEventListener('change',e=>{ state.notes=e.target.checked; save(); render(); });
+document.getElementById('citrus').addEventListener('change',e=>{ state.citrus=e.target.checked; save(); render(); });
 document.getElementById('printBtn').addEventListener('click', printRecipe);
 document.getElementById('resetQty').addEventListener('click',()=>{ state.ovr={}; save(); render(); });
 const recipeEl=document.querySelector('.recipe');

@@ -1,5 +1,5 @@
-// Versión d24ccbf4b8: cambia con cada nueva versión de la app, así el iPad descarga la nueva al tener conexión
-const C='batido-d24ccbf4b8', F='batido-fuentes';
+// Versión f3a6acf28e: cambia con cada nueva versión de la app, así el iPad descarga la nueva al tener conexión
+const C='batido-f3a6acf28e', F='batido-fuentes';
 const FILES=['./','index.html','manifest.webmanifest','icon-180.png','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{ e.waitUntil(caches.open(C).then(c=>c.addAll(FILES.map(f=>new Request(f,{cache:'reload'})))).then(()=>self.skipWaiting())); });
 self.addEventListener('activate',e=>{ e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==C&&k!==F).map(k=>caches.delete(k)))).then(()=>self.clients.claim())); });
