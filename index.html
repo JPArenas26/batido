@@ -72,6 +72,16 @@ select{font:inherit;font-size:16px;padding:4px 6px;border-radius:6px;border:1px 
 .sum{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:12px 0 4px}
 .sum div{grid-column:span 3}
 .sum div.cost{grid-column:span 6}
+.sum div:not(.cost):last-child:nth-child(even){grid-column:span 6}
+.modes{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.modes .mlbl{flex-basis:100%;font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.modes button{font-size:15px;padding:6px 12px;border-radius:999px}
+.modes button[aria-pressed="true"]{background:var(--olive);border-color:var(--olive);color:var(--panel);font-weight:700}
+.flavnote{border:2px solid var(--olive);background:var(--olive-soft);border-radius:8px;padding:8px 12px;margin:0 0 12px}
+.flavnote p{margin:0 0 6px;font-size:15px}
+.flavnote ul{margin:0 0 6px;padding-left:20px;font-size:15px}
+.flavnote .dz{font-size:14px;color:var(--muted)}
+.step.flav ul.items li{background:var(--olive-soft)}
 
 .sum div{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .sum b{display:block;font-family:var(--f-display);font-size:22px;font-variant-numeric:tabular-nums}
@@ -106,6 +116,7 @@ ul.items .q{font-variant-numeric:tabular-nums;text-align:right;white-space:nowra
 p.how{font-size:16px;margin:12px 0 0;color:var(--fg)}
 .mk{display:inline-block;font-size:13px;font-weight:700;padding:1px 7px;border-radius:999px;margin-left:6px}
 .mk.comp{background:var(--olive-soft);color:var(--olive);border:1px solid var(--olive)}
+.mk.flat{background:var(--reserve-soft);color:var(--muted);border:1px dashed var(--muted)}
 .mk.libre{background:var(--reserve-soft);color:var(--fg);border:1px solid var(--line)}
 .list.sug li{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px;background:var(--olive-soft)}
 .sugnote{font-size:15px;color:var(--muted);margin:6px 0 0}
@@ -198,6 +209,7 @@ button.primary:hover{filter:brightness(1.08)}
         <label for="secSel">Estado secretor <select id="secSel"><option value="sec">Secretor (o no lo sé)</option><option value="non">No secretor</option></select></label>
         <label for="notes"><input type="checkbox" id="notes"> Notas de piel y ecológico</label>
       </div>
+      <div id="modeBox"></div>
       <div class="sum" id="sum"></div>
       <div id="comp"></div>
       <div class="printrow"><button id="printBtn" type="button" class="primary">Receta en PDF para imprimir</button><button id="resetQty" type="button" hidden>Restablecer cantidades</button><span id="printMsg" role="status"></span></div>
@@ -809,7 +821,7 @@ function totals(inc, mult={}){
   return t;
 }
 
-function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, force:force0=[], lock=null}){
+function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, force:force0=[], lock=null, capS=20, capC=40}){
   // Una cantidad puesta a 0 a mano equivale a no tener el ingrediente
   const zero=[...have0].filter(id=>BY[id] && (mult[id]??1)<=0);
   const have=new Set([...have0].filter(id=>BY[id] && (mult[id]??1)>0));
@@ -973,12 +985,12 @@ function compute({have:have0, prot:choice=null, last=null, maxF=2, mult={}, forc
   const trimmed=[];
   {
     const MM = () => ({...autoM, ...mult});
-    const over = () => { const t=totals(inc,MM()); return t.sug>20+1e-9 || t.cho>40+1e-9; };
+    const over = () => { const t=totals(inc,MM()); return t.sug>capS+1e-9 || t.cho>capC+1e-9; };
     const stepM = i => (i.u==='g'||i.u==='ml') ? (i.q>=100?10:i.q>=20?5:1)/i.q : 0.25;
     // Solo se recorta si quitando la fruta ajustable se llega a verde; si el exceso viene de otra cosa, no se toca la fruta
     const adj0=[...inc].filter(id=>(BY[id].cap==='F'||BY[id].cap==='D') && !F(id) && mult[id]===undefined);
     const tRest=totals(new Set([...inc].filter(id=>!adj0.includes(id))), MM());
-    const reachable = tRest.sug<=20+1e-9 && tRest.cho<=40+1e-9;
+    const reachable = tRest.sug<=capS+1e-9 && tRest.cho<=capC+1e-9;
     for(let guard=0; reachable && guard<200 && over(); guard++){
       const adj=[...inc].map(id=>BY[id]).filter(i=>(i.cap==='F'||i.cap==='D') && !F(i.id) && mult[i.id]===undefined)
         .sort((a,b)=>(b.cap==='D')-(a.cap==='D') || b.pr-a.pr);
@@ -1236,7 +1248,178 @@ function shopping(input, stepOf, rank){
   }
   return {list:pick.sort((a,b)=>rank(a)-rank(b)), p0, p:best};
 }
-return {compute, totals, suggest, rebalance, penalty, shopping, BY, nm};
+
+// ---------- Colores de las casillas (los mismos en pantalla y en el PDF) ----------
+// Potasio: un desayuno debería aportar ~25 % de los 3.500 mg diarios de referencia (EFSA): verde ≥ 875 mg, ámbar ≥ 525 mg (15 %)
+function zones(t, ratio){
+  let fib = (t.sug>8 && ratio>3)?'hi':(t.sug>8 && ratio>2)?'mid':'ok';
+  if(t.fib>25 && fib==='ok') fib='mid';
+  return {
+    kcal: t.kcal>650?'hi':t.kcal>550?'mid':'ok',
+    prot: t.prot<12?'hi':t.prot<20?'mid':'ok',
+    fib,
+    sug: t.sug>30?'hi':t.sug>20?'mid':'ok',
+    cho: t.cho>55?'hi':t.cho>40?'mid':'ok',
+    unsat: t.unsat<5?'mid':'ok',
+    ala: t.ala<0.8?'hi':t.ala<1.5?'mid':'ok',
+    sat: t.sat>8?'hi':t.sat>5?'mid':'ok',
+    k: t.k<525?'hi':t.k<875?'mid':'ok'
+  };
+}
+const ZR={ok:0,mid:1,hi:2};
+// Ninguna casilla pasa a un color peor (verde → ámbar o rojo; ámbar → rojo)
+const noWorse=(z0,z1)=>Object.keys(z0).every(k=>ZR[z1[k]]<=ZR[z0[k]]);
+const ratioOf=t=>t.fib>0 ? t.sug/t.fib : 99;
+
+// ---------- Toques de sabor (cantidades por ración) ----------
+// Valores por 100 g: zumo de limón (los del zumo de la base de datos), piel de limón o naranja (USDA, piel de limón)
+const per=(n100,g)=>{ const k=g/100; const o={}; for(const x in n100) o[x]=n100[x]*k; return o; };
+const ZUMO100={kcal:22,sug:2.5,cho:6.6,fib:0.3,prot:0.4,fat:0.2,sat:0,ala:0,k:103,ca:6,vc:39};
+const PIEL100={kcal:47,sug:4.2,cho:5.4,fib:10.6,prot:1.5,fat:0.3,sat:0,ala:0,k:160,ca:134,vc:129};
+const ingPer=(id,g)=>{ const i=BY[id]; return per({kcal:i.n[0],sug:i.n[1],cho:i.cho??i.n[1],fib:i.n[2],prot:i.n[3],fat:i.f[0],sat:i.f[1],ala:i.mic?i.mic[0]:0,k:i.mic?i.mic[1]:0,ca:i.mic?i.mic[2]:0,vc:i.mic?i.mic[3]:0},g); };
+// Fuentes disponibles en la despensa
+function touchSources(have){
+  const H=id=>have.has(id);
+  const juice = H('limon') ? {id:'zumo', src:'limon', txt:'Zumo de limón recién exprimido', q:15, u:'ml', an:15, au:'ml', hint:'≈ ½ limón por ración'}
+    : H('lima') ? {id:'zumo', src:'lima', txt:'Zumo de lima recién exprimido', q:15, u:'ml', an:15, au:'ml', hint:'≈ ½ lima por ración'}
+    : H('zumo') ? {id:'zumo', src:'zumo', txt:'Zumo de limón', q:15, u:'ml', an:15, au:'ml', hint:'1 cda por ración'} : null;
+  const zsrc = H('naranja')?'naranja':H('mandarina')?'mandarina':H('limon')?'limon':H('lima')?'lima':null;
+  const zest = zsrc ? {id:'ralladura', src:zsrc, txt:'Ralladura de '+({naranja:'naranja',mandarina:'mandarina',limon:'limón',lima:'lima'})[zsrc]+' ecológica', q:2, u:'g', an:1, au:'cdta', hint:'solo la parte de color, sin lo blanco, que amarga'} : null;
+  const spices = ['vainilla','canela','cardamomo'].filter(H).map(id=>({id:'especia', src:id,
+    txt: id==='vainilla'?'Vainilla natural':id==='canela'?'Canela de Ceilán':'Cardamomo molido',
+    q: id==='canela'?0.6:0.25, u:'g', an: id==='canela'?0.25:0.125, au:'cdta', hint: id==='vainilla'?'su aroma hace que se perciba más dulce':'especia dulce: realza el dulzor'}));
+  const salt = {id:'sal', src:'sal', txt:'Sal', q:0.1, u:'g', an:1, au:'pizca', hint:'muy pequeña (unos 40 mg de sodio por ración): atenúa el amargor y realza el dulzor'};
+  return {juice, zest, spices, salt};
+}
+function extraNut(x){
+  if(x.id==='zumo') return {...per(ZUMO100,x.q), eur:0.16};
+  if(x.id==='ralladura') return {...per(PIEL100,x.q), eur:0};
+  if(x.id==='especia') return {...ingPer(x.src,x.q), eur:BY[x.src].pk*x.q/1000};
+  return {eur:0};
+}
+// Totales por ración con los toques añadidos (n = raciones a las que se aplica cada cantidad: 1)
+function withExtras(t0, xs){
+  const t={...t0};
+  for(const x of xs){ const n=extraNut(x); for(const k in n) if(k in t) t[k]+=n[k]; }
+  t.unsat=Math.max(0,t.fat-t.sat);
+  return {tot:t, ratio:ratioOf(t)};
+}
+
+// Sabor previsiblemente plano: ingredientes que apagan el sabor y falta de lo que lo realza
+const FLAT = {aguacate:'cubre el paladar y apaga los aromas', guisantes:'sabor terroso', garbanzos:'sabor terroso', alubias:'sabor terroso', tofu:'diluye el sabor', proteina:'sabor terroso y algo harinoso'};
+function flatness(r){
+  if(!r || !r.inc.size) return {score:0, reasons:[]};
+  const inc=r.inc, reasons=[]; let s=0;
+  if(inc.has('aguacate')){ s+=2; reasons.push('el aguacate, que cubre el paladar y apaga los aromas'); }
+  const leg=['guisantes','garbanzos','alubias'].filter(id=>inc.has(id));
+  if(leg.length){ s+=2*leg.length; reasons.push('el sabor terroso de '+leg.map(nm).join(' y ')); }
+  if(inc.has('tofu')){ s+=1; reasons.push('el tofu, que diluye el sabor'); }
+  if(inc.has('proteina') && (r.auto?.proteina??1)>=1 ){ s+=1; reasons.push('la proteína de guisante'); }
+  if(r.tot.sug<12){ s+=1; reasons.push('poco dulzor (unos '+Math.round(r.tot.sug)+' g de azúcares)'); }
+  if(!['limon','lima','zumo','naranja','mandarina','kiwi'].some(id=>inc.has(id))){ s+=1; reasons.push('falta un cítrico que le dé frescor'); }
+  if(!['vainilla','canela','cardamomo'].some(id=>inc.has(id))){ s+=1; reasons.push('no lleva especia dulce'); }
+  return {score:s, reasons};
+}
+
+// Modo «Toque final segunda ración»: lo que se añade a una sola ración, ya servida, sin que ninguna casilla
+// de esa ración pase a un color peor que en la receta
+function finishTouch(input, r){
+  if(!r || !r.inc.size) return null;
+  const src=touchSources(new Set([...input.have].filter(id=>BY[id])));
+  const z0=zones(r.tot, r.ratio);
+  let items=[src.juice, src.zest, src.spices[0], src.salt].filter(Boolean);
+  const dropped=[];
+  // Si algo cambiara de color, se quita primero lo que más azúcar y carbohidratos suma
+  for(let g=0; g<5; g++){
+    const w=withExtras(r.tot, items);
+    if(noWorse(z0, zones(w.tot, w.ratio))) return {items, dropped, tot:w.tot, ratio:w.ratio, z0, z1:zones(w.tot,w.ratio)};
+    const cand=items.filter(x=>x.id!=='sal').map(x=>({x, c:(extraNut(x).sug||0)+(extraNut(x).cho||0)})).sort((a,b)=>b.c-a.c);
+    if(!cand.length) break;
+    items=items.filter(x=>x!==cand[0].x); dropped.push(cand[0].x);
+  }
+  const w=withExtras(r.tot, items);
+  return {items, dropped, tot:w.tot, ratio:w.ratio, z0, z1:zones(w.tot,w.ratio)};
+}
+
+// Modo «Sabor seguro»: misma despensa, pero con zumo de limón, ralladura cítrica, especia dulce y una pizca de sal,
+// y con menos aguacate y legumbres (su hueco lo ocupa otra fuente de la despensa). Se prueban las combinaciones
+// de más a menos cambio y se queda la primera en la que ninguna casilla pasa a un color peor, no falta ninguna
+// compensación nueva y no aparece ningún aviso rojo nuevo.
+// Cuánto le falta a cada casilla para volver a su color de partida (0 si ninguna está peor)
+const THR={kcal:['max',550,650,50], prot:['min',20,12,4], sug:['max',20,30,5], cho:['max',40,55,7.5], unsat:['min',5,-1,2], ala:['min',1.5,0.8,0.35], sat:['max',5,8,1.5], k:['min',875,525,100]};
+function viol(z0, t, ratio){
+  const z1=zones(t, ratio); let v=0;
+  for(const k in z0){ if(ZR[z1[k]]<=ZR[z0[k]]) continue;
+    v+=1;
+    const th=THR[k]; if(!th) continue;
+    const lim = z0[k]==='ok' ? th[1] : th[2];
+    v += th[0]==='max' ? Math.max(0,t[k]-lim)/th[3] : Math.max(0,lim-t[k])/th[3];
+  }
+  return v;
+}
+function flavorSafe(input, r0){
+  if(!r0 || !r0.inc.size) return null;
+  const have=new Set([...input.have].filter(id=>BY[id])), mult=input.mult||{}, force=new Set(input.force||[]);
+  const free=id=>r0.inc.has(id) && !force.has(id) && mult[id]===undefined;
+  const avo=free('aguacate'), leg=['guisantes','garbanzos','alubias'].filter(free);
+  const src=touchSources(have);
+  const z0=zones(r0.tot, r0.ratio);
+  const hi0=new Set(r0.warn.filter(w=>w.lvl==='hi').map(w=>w.txt));
+  const combos=[];
+  for(const a of (avo?['quitar','mitad','mantener']:['mantener']))
+    for(const l of (leg.length?['quitar','mitad','mantener']:['mantener']))
+      for(const j of (src.juice?[true,false]:[false]))
+        combos.push({a,l,j,score:(a==='quitar'?2:a==='mitad'?1:0)+(l==='quitar'?2:l==='mitad'?1:0)+(j?1.5:0)});
+  combos.sort((x,y)=>y.score-x.score);
+  for(const c of combos){
+    const rm=new Set([...(c.a==='quitar'?['aguacate']:[]), ...(c.l==='quitar'?leg:[])]);
+    const have2=new Set([...have].filter(id=>!rm.has(id)));
+    const half={}; if(c.a==='mitad') half.aguacate=0.5; if(c.l==='mitad') for(const id of leg) half[id]=0.5;
+    const m2={...mult, ...half};
+    // Con cantidades cambiadas a mano, lo que entra en lugar de lo quitado se decide sobre la receta sin esos cambios
+    // El hueco para el zumo y la ralladura se hace recortando un poco la fruta, como ya hace la app con el azúcar
+    const xs=[...(c.j?[src.juice]:[]), src.zest].filter(Boolean), xw=withExtras({sug:0,cho:0,fat:0,sat:0}, xs).tot;
+    const spMax=Math.max(0,...src.spices.map(x=>extraNut(x).sug||0)), spMaxC=Math.max(0,...src.spices.map(x=>extraNut(x).cho||0));
+    let inp2={...input, have:have2, mult:m2, prot:r0.prot, capS:20-xw.sug-spMax, capC:40-xw.cho-spMaxC};
+    if(input.lock){ const base=compute({...inp2, mult:half, lock:null}); inp2={...inp2, lock:base.inc}; }
+    const rs=compute(inp2);
+    if(!rs.inc.size) continue;
+    if((rs.missing||[]).some(tg=>!(r0.missing||[]).includes(tg))) continue;
+    if(rs.warn.some(w=>w.lvl==='hi' && !hi0.has(w.txt))) continue;
+    // Especia dulce: la primera disponible que no esté ya en la receta (si ya hay vainilla, canela y cardamomo, ninguna)
+    const sp=src.spices.find(x=>!rs.inc.has(x.src));
+    const items=[...(c.j?[src.juice]:[]), src.zest, sp, src.salt].filter(Boolean);
+    // Si alguna casilla quedaría peor (por ejemplo, el potasio al quitar aguacate), se intenta compensar subiendo
+    // un poco otros ingredientes que ya están en la receta, sin pasar de su máximo prudente
+    let rv=rs, mv={...m2};
+    const ev=rr=>{ const w=withExtras(rr.tot, items); return {w, v:viol(z0, w.tot, w.ratio)}; };
+    let cur=ev(rv);
+    for(let it=0; it<12 && cur.v>0; it++){
+      let best=null;
+      for(const id of rv.inc){ const i=BY[id];
+        if(force.has(id) || mult[id]!==undefined || half[id]!==undefined || i.cap==='F' || i.cap==='D' || ['te','matcha','cacao','avena','salvado','psyllium'].includes(id) || FLAT[id]) continue;
+        const mx=i.comp || i.libre || (i.mx ? i.mx[0] : 1.5), now=mv[id] ?? (rv.auto&&rv.auto[id]) ?? 1;
+        if(now+0.25>mx+1e-9) continue;
+        const m3={...mv, [id]:now+0.25}, r3=compute({...inp2, mult:m3});
+        if(!r3.inc.has(id) || [...rv.inc].some(x=>!r3.inc.has(x))) continue;
+        if(r3.warn.some(w=>w.lvl==='hi' && !hi0.has(w.txt))) continue;
+        const e=ev(r3); if(e.v < (best?best.e.v:cur.v)-1e-9) best={id, m3, r3, e};
+      }
+      if(!best) break;
+      mv=best.m3; rv=best.r3; cur=best.e;
+    }
+    if(cur.v>0) continue;
+    const w=cur.w, z1=zones(w.tot, w.ratio);
+    if(!noWorse(z0, z1)) continue;
+    const removed=[...rm].filter(id=>r0.inc.has(id)), added=[...rs.inc].filter(id=>!r0.inc.has(id)), gone=[...r0.inc].filter(id=>!rs.inc.has(id) && !rm.has(id));
+    const raised=Object.keys(mv).filter(id=>mult[id]===undefined && half[id]===undefined).map(id=>[id, mv[id]]);
+    const added2=[...rv.inc].filter(id=>!r0.inc.has(id)), gone2=[...r0.inc].filter(id=>!rv.inc.has(id) && !rm.has(id));
+    const vmult={}; for(const id in mv) if(mult[id]===undefined) vmult[id]=mv[id];
+    return {r:{...rv, tot:w.tot, ratio:w.ratio, flavor:true, vmult}, base:rv, items, removed, halved:Object.keys(half), raised, added:added2, gone:gone2, z0, z1, combo:c};
+  }
+  return null;
+}
+return {compute, totals, suggest, rebalance, penalty, shopping, zones, noWorse, withExtras, flatness, finishTouch, flavorSafe, touchSources, FLAT, BY, nm};
 }
 if (typeof module !== 'undefined') module.exports = { makeEngine };
 
@@ -1259,16 +1442,16 @@ const shopRank = id => { const k=SHOP.indexOf(id); return k<0 ? 999 : k; };
 const DEFAULT = ['naranja','limon','zanahoria','jengibre','manzana','frutosrojos','nueces','almendras','lino','chia','avena','proteina','te','cacao','aove','canela'];
 const TODAY = new Date().toDateString();
 let lastInp = null, lastRB = {}, shopCache = {key:null, res:null};
-let state = {have:new Set(DEFAULT), force:new Set(), lilaDone:{}, serv:2, prot:null, last:null, bt:'', sec:'sec', maxF:2, notes:true, ovr:{}, mixer:'jarra'};
+let state = {mode:'base', have:new Set(DEFAULT), force:new Set(), lilaDone:{}, serv:2, prot:null, last:null, bt:'', sec:'sec', maxF:2, notes:true, ovr:{}, mixer:'jarra'};
 try{ const s=JSON.parse(localStorage.getItem('batido-v2')||localStorage.getItem('batido-v1')||'null');
-  if(s){ state.have=new Set(s.have.filter(id=>BY[id])); state.force=new Set((s.force||[]).filter(id=>state.have.has(id))); state.lilaDone=(s.lilaDone&&typeof s.lilaDone==='object')?s.lilaDone:{}; state.serv=[1,2,3,4].includes(s.serv)?s.serv:2; state.bt=s.bt||''; state.sec=s.sec==='non'?'non':'sec'; state.maxF=s.maxF||2; state.notes=s.notes!==false; state.ovr=(s.ovr&&typeof s.ovr==='object')?Object.fromEntries(Object.entries(s.ovr).filter(([k,v])=>BY[k]&&typeof v==='number'&&v>=0)):{};
+  if(s){ state.have=new Set(s.have.filter(id=>BY[id])); state.force=new Set((s.force||[]).filter(id=>state.have.has(id))); state.lilaDone=(s.lilaDone&&typeof s.lilaDone==='object')?s.lilaDone:{}; state.serv=[1,2,3,4].includes(s.serv)?s.serv:2; state.mode=['base','toque','sabor'].includes(s.mode)?s.mode:'base'; state.bt=s.bt||''; state.sec=s.sec==='non'?'non':'sec'; state.maxF=s.maxF||2; state.notes=s.notes!==false; state.ovr=(s.ovr&&typeof s.ovr==='object')?Object.fromEntries(Object.entries(s.ovr).filter(([k,v])=>BY[k]&&typeof v==='number'&&v>=0)):{};
     if(s.day===TODAY){ state.prot=s.prot||null; state.last=s.last||null; }
     else { state.prot=null; state.last=s.used||s.prot||null;
       // Día nuevo: lo que se puso a 0 era para ese día; vuelve a la cantidad propuesta
       for(const k in state.ovr) if(state.ovr[k]===0) delete state.ovr[k]; } } }catch(e){}
 let used=null;
 try{ if(localStorage.getItem('batido-mixer')==='vaso') state.mixer='vaso'; }catch(e){}
-const save=()=>{ try{ localStorage.setItem('batido-v2',JSON.stringify({have:[...state.have],force:[...state.force],lilaDone:state.lilaDone,serv:state.serv,prot:state.prot,day:TODAY,last:state.last,used,bt:state.bt,sec:state.sec,maxF:state.maxF,notes:state.notes,ovr:state.ovr})) }catch(e){} };
+const save=()=>{ try{ localStorage.setItem('batido-v2',JSON.stringify({mode:state.mode,have:[...state.have],force:[...state.force],lilaDone:state.lilaDone,serv:state.serv,prot:state.prot,day:TODAY,last:state.last,used,bt:state.bt,sec:state.sec,maxF:state.maxF,notes:state.notes,ovr:state.ovr})) }catch(e){} };
 
 const esc = s => String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function frac(n){ const w=Math.floor(n), r=+(n-w).toFixed(3); const m={0.125:'⅛',0.25:'¼',0.375:'⅜',0.5:'½',0.625:'⅝',0.75:'¾',0.875:'⅞'}[r]; if(m) return (w?w:'')+m; return (Math.round(n*10)/10).toString().replace('.',','); }
@@ -1276,7 +1459,7 @@ function cdaOf(i,n){ if(!i.gcda || i.u!=='g' || n<=0) return ''; const c=Math.ma
 function qty(i,f,m=1,cda=true){ const n=i.q*f*m; if(i.u==='g'||i.u==='ml'){ const c=cda?cdaOf(i,n):''; return Math.round(n)+' '+i.u+(c?' ('+c+')':''); } return frac(n)+' '+i.u; }
 const capOf = i => i.comp || i.libre || 0;
 const maxTxt = (i,f) => capOf(i) ? qty(i,f,capOf(i),false) : '';
-const M = id => state.ovr[id] ?? (lastR && lastR.auto && lastR.auto[id]) ?? 1;
+const M = id => state.ovr[id] ?? (lastR && lastR.vmult && lastR.vmult[id]) ?? (lastR && lastR.auto && lastR.auto[id]) ?? 1;
 // Paso de los botones − y +, según la unidad y el tamaño de la cantidad
 function stepOf(i,f){ if(i.u==='g'||i.u==='ml'){ const b=i.q*f; return b>=100?10:b>=20?5:1; } if(i.u==='pizca') return 1; if(i.u==='ud.') return 0.5; return 0.25; }
 function numOf(i,f){ if(lastR && !lastR.inc.has(i.id)) return '0'; const n=i.q*f*M(i.id); return (i.u==='g'||i.u==='ml') ? String(Math.round(n)) : String(Math.round(n*100)/100).replace('.',','); }
@@ -1321,6 +1504,9 @@ function printLines(){
     if(gr.g===4) its.unshift(['Agua (aprox.; completa hasta '+fmt(state.serv*0.75,2).replace(/,?0+$/,'')+' L'+(p.psy?'; incluye '+p.psy+' ml más por el psyllium':'')+')', p.water+' ml']);
     if(its.length){ lines.push({h:gr.title}); lines.push(...its); }
   }
+  const {fsv, ft}=lastMode;
+  if(fsv && fsv.items.length){ lines.push({h:'Toque de sabor (añádelo al final, antes de batir)'}); lines.push(...fsv.items.map(x=>[x.txt, amtTxt(x,state.serv)])); }
+  if(ft && ft.items.length){ lines.push({h:'Toque final: añádelo solo a '+servWho()+(state.serv===1?'':', ya servida')+'; remueve bien'}); lines.push(...ft.items.map(x=>[x.txt, amtTxt(x,1)])); }
   return lines;
 }
 // Fecha local (no UTC) para el nombre del archivo
@@ -1329,35 +1515,28 @@ const STW = {ok:'verde', mid:'ámbar', hi:'rojo'};
 // Si al redondear un valor cae justo en un umbral, se muestra con un decimal más (nunca «20 g ÁMBAR» con «verde ≥ 20 g»)
 function fmtT(v, d, ths){ const r=Math.round(v*10**d)/10**d; return ths.some(x=>Math.abs(r-x)<1e-9 && Math.abs(v-x)>1e-9) ? fmt(v,d+1) : fmt(v,d); }
 function summaryItems(r){
-  const t=r.tot;
-  const kc = t.kcal>650?'hi':t.kcal>550?'mid':'ok';
-  const pc = t.prot<12?'hi':t.prot<20?'mid':'ok';
-  const sc = t.sug>30?'hi':t.sug>20?'mid':'ok';
-  let rc = (t.sug>8 && r.ratio>3)?'hi':(t.sug>8 && r.ratio>2)?'mid':'ok';
-  if(t.fib>25 && rc==='ok') rc='mid';   // demasiada fibra de una vez
-  const uc = t.unsat<5?'mid':'ok';
-  const tc = t.sat>8?'hi':t.sat>5?'mid':'ok';
-  const cc = t.cho>55?'hi':t.cho>40?'mid':'ok';
-  const oc = t.ala<0.8?'hi':t.ala<1.5?'mid':'ok';
+  const t=r.tot, z=ENG.zones(t, r.ratio);
   return [
     // l: texto en pantalla; p: texto más corto para las casillas del PDF (allí se indica una vez «por ración»);
     // r: rangos de cada color, solo en pantalla
     {v:fmt(t.eur,2)+' €', l:'coste por ración', p:'coste', k:'cost'},
-    {v:fmtT(t.kcal,0,[550,650]), l:'kcal por ración', p:'kcal', c:kc, r:'verde ≤ 550 · ámbar ≤ 650 · más, rojo'},
-    {v:fmtT(t.prot,0,[20,12])+' g', l:'proteína por ración', p:'proteína', c:pc, r:'verde ≥ 20 g · ámbar ≥ 12 g · menos, rojo'},
-    {v:fmtT(t.fib,0,[25])+' g', l:'fibra · '+fmtT(Math.min(r.ratio,99),1,[2,3])+' g azúcar/g fibra', p:'fibra · '+fmtT(Math.min(r.ratio,99),1,[2,3])+' azúcar/fibra', c:rc, r:'color según azúcar/fibra: verde ≤ 2 · ámbar ≤ 3 · más, rojo; y ámbar si pasa de 25 g de fibra'},
-    {v:fmtT(t.sug,0,[20,30])+' g', l:'azúcares por ración', p:'azúcares', c:sc, r:'verde ≤ 20 g · ámbar ≤ 30 g · más, rojo'},
-    {v:fmtT(t.cho,0,[40,55])+' g', l:'carbohidratos disponibles (azúcares + almidón)', p:'carbohidratos', c:cc, r:'verde ≤ 40 g · ámbar ≤ 55 g · más, rojo'},
-    {v:fmtT(t.unsat,0,[5])+' g', l:'grasas buenas (insaturadas)', p:'grasas buenas', c:uc, r:'verde ≥ 5 g · menos, ámbar'},
-    {v:fmtT(t.ala,1,[1.5,0.8])+' g', l:'omega-3 (ALA)', p:'omega-3', c:oc, r:'verde ≥ 1,5 g · ámbar ≥ 0,8 g · menos, rojo'},
-    {v:fmtT(t.sat,1,[5,8])+' g', l:'grasas saturadas', p:'grasas saturadas', c:tc, r:'verde ≤ 5 g · ámbar ≤ 8 g · más, rojo'},
+    {v:fmtT(t.kcal,0,[550,650]), l:'kcal por ración', p:'kcal', c:z.kcal, r:'verde ≤ 550 · ámbar ≤ 650 · más, rojo'},
+    {v:fmtT(t.prot,0,[20,12])+' g', l:'proteína por ración', p:'proteína', c:z.prot, r:'verde ≥ 20 g · ámbar ≥ 12 g · menos, rojo'},
+    {v:fmtT(t.fib,0,[25])+' g', l:'fibra · '+fmtT(Math.min(r.ratio,99),1,[2,3])+' g azúcar/g fibra', p:'fibra · '+fmtT(Math.min(r.ratio,99),1,[2,3])+' azúcar/fibra', c:z.fib, r:'color según azúcar/fibra: verde ≤ 2 · ámbar ≤ 3 · más, rojo; y ámbar si pasa de 25 g de fibra'},
+    {v:fmtT(t.sug,0,[20,30])+' g', l:'azúcares por ración', p:'azúcares', c:z.sug, r:'verde ≤ 20 g · ámbar ≤ 30 g · más, rojo'},
+    {v:fmtT(t.cho,0,[40,55])+' g', l:'carbohidratos disponibles (azúcares + almidón)', p:'carbohidratos', c:z.cho, r:'verde ≤ 40 g · ámbar ≤ 55 g · más, rojo'},
+    {v:fmtT(t.unsat,0,[5])+' g', l:'grasas buenas (insaturadas)', p:'grasas buenas', c:z.unsat, r:'verde ≥ 5 g · menos, ámbar'},
+    {v:fmtT(t.ala,1,[1.5,0.8])+' g', l:'omega-3 (ALA)', p:'omega-3', c:z.ala, r:'verde ≥ 1,5 g · ámbar ≥ 0,8 g · menos, rojo'},
+    {v:fmtT(t.sat,1,[5,8])+' g', l:'grasas saturadas', p:'grasas saturadas', c:z.sat, r:'verde ≤ 5 g · ámbar ≤ 8 g · más, rojo'},
+    {v:fmtT(t.k,0,[875,525])+' mg', l:'potasio por ración', p:'potasio', c:z.k, r:'verde ≥ 875 mg (¼ de lo diario) · ámbar ≥ 525 mg · menos, rojo'},
   ];
 }
 function printHeader(){
   const labels={te:'té verde',cacao:'cacao',ninguno:'sin protagonista'};
   const d=new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
   const both=(lastR.inc.has('te')||lastR.inc.has('matcha')) && lastR.inc.has('cacao');
-  return d.charAt(0).toUpperCase()+d.slice(1)+' · '+state.serv+(state.serv>1?' raciones':' ración')+' de 750 ml · '+(both?'té verde y cacao':labels[lastR.prot]);
+  const md = lastMode.fsv ? ' · sabor seguro' : lastMode.ft ? ' · con toque final' : '';
+  return d.charAt(0).toUpperCase()+d.slice(1)+' · '+state.serv+(state.serv>1?' raciones':' ración')+' de 750 ml · '+(both?'té verde y cacao':labels[lastR.prot])+md;
 }
 const pdfSafe = s => s.replace(/≈/g,'aprox.').replace(/(\d)([⅓⅛⅜⅝⅞])/g,'$1 $2').replace(/⅓/g,'1/3').replace(/⅛/g,'1/8').replace(/⅜/g,'3/8').replace(/⅝/g,'5/8').replace(/⅞/g,'7/8').replace(/[^\x20-\x7E\u00A0-\u00FF€–—«»‘’“”…]/g,'');
 function wrapText(t, font, size, maxW){
@@ -1367,7 +1546,7 @@ function wrapText(t, font, size, maxW){
   if(cur) out.push(cur); return out;
 }
 const mixerTxt = () => state.mixer==='jarra'
-  ? 'Llenado: jarra (opción por defecto). Orden pensado para una sola cuchara: frutos secos alergénicos al final de los secos; cítricos, al final. Bate 45-60 s.'
+  ? 'Llenado: jarra (opción por defecto), en este orden. Bate 45-60 s.'
   : 'Llenado: vaso individual tipo Nutri Ninja. Llénalo en este orden, de abajo arriba; ciérralo, dale la vuelta y bate todo junto 45-60 s.';
 async function makePDF(lines){
   const {PDFDocument, StandardFonts, rgb} = window.PDFLib;
@@ -1380,12 +1559,14 @@ async function makePDF(lines){
   const EDGE={ok:rgb(0.337,0.4,0.165), mid:rgb(0.541,0.427,0), hi:rgb(0.635,0.231,0.165)};
   let page=pdf.addPage([W,H]), y=TOP;
   page.drawText('Batido del día',{x:L,y,size:24,font:bold}); y-=8*mm;
-  for(const t of wrapText(pdfSafe(printHeader()+' · valores por ración'),font,14,R-L)){ page.drawText(t,{x:L,y,size:14,font}); y-=5.6*mm; }
+  const all9=summaryItems(lastR), cost=all9.find(it=>it.k==='cost');
+  for(const t of wrapText(pdfSafe(printHeader()+' · valores por ración · coste '+cost.v),font,14,R-L)){ page.drawText(t,{x:L,y,size:14,font}); y-=5.6*mm; }
   y-=1.5*mm;
-  // Resumen: 3 filas de 3 casillas (energía, coste, proteína · fibra, azúcares, carbohidratos · grasas buenas, omega-3, saturadas)
-  const items=summaryItems(lastR), gap=2.5*mm;
-  for(const row of [items.slice(0,3), items.slice(3,6), items.slice(6)]){
-    const bw=(R-L-gap*(row.length-1))/row.length;
+  // Resumen: 3 filas de 3 casillas (kcal, proteína, fibra · azúcares, carbohidratos, grasas buenas · omega-3, saturadas, potasio);
+  // el coste va en la línea de cabecera
+  const items=all9.filter(it=>it.k!=='cost'), gap=2.5*mm;
+  for(const row of [items.slice(0,3), items.slice(3,6), items.slice(6,9)]){
+    const bw=(R-L-gap*2)/3;
     const head=row.map(it=>{ const v=pdfSafe(it.v), w=it.c?STW[it.c].toUpperCase():''; return {v, w, wv:bold.widthOfTextAtSize(v,20), ww:w?bold.widthOfTextAtSize(w,14)+2*mm:0}; });
     const inl=row.map(()=>false);
     const lws=row.map((it,k)=>inl[k]?[]:wrapText(pdfSafe(it.p||it.l),font,14,bw-5*mm));
@@ -1482,6 +1663,16 @@ async function printRecipe(){
   try{ window.print(); }catch(e){ msg.textContent='Tu navegador no permite generar el PDF desde aquí.'; }
 }
 
+// ---------- Modos de sabor ----------
+let lastMode = {mode:'base'};
+const MODES = [['base','Receta inicial'],['toque','Toque final 2.ª ración'],['sabor','Sabor seguro']];
+const amtTxt = (x,n) => x.au==='ml' ? Math.round(x.an*n)+' ml' : x.au==='pizca' ? (n===1?'1 pizca':frac(n)+' pizcas') : frac(x.an*n)+' '+x.au;
+const ZKEYS = [['kcal','kcal','',0],['prot','proteína','g',0],['fib','fibra','g',0],['sug','azúcares','g',1],['cho','carbohidratos','g',0],['unsat','grasas buenas','g',0],['ala','omega-3','g',1],['sat','saturadas','g',1],['k','potasio','mg',0]];
+// Cambios de los indicadores entre dos recetas, solo los que se notan al redondear
+function diffTxt(t0, t1){
+  return ZKEYS.map(([k,l,u,d])=>{ const a=fmt(t0[k],d), b=fmt(t1[k],d); return a===b ? null : l+' '+a+' → '+b+(u?' '+u:''); }).filter(Boolean).join(' · ');
+}
+const servWho = () => state.serv===1 ? 'tu vaso' : 'la segunda ración';
 function render(){
   // Receta propuesta sin cambios a mano: tras un cambio, nada que no estuviera en ella entra solo (lock),
   // y la fruta que había sirve de referencia para reponerla con otra si se quita a mano (fruitTarget)
@@ -1491,8 +1682,14 @@ function render(){
     inp={...inp, lock:r0.inc, fruitTarget:[...r0.inc].filter(id=>BY[id].cap==='F').reduce((a,id)=>a+BY[id].gr*((r0.auto&&r0.auto[id])||1)/2,0)};
   }
   lastInp=inp;
-  const r = ENG.compute(inp);
-  lastR = r;
+  const r0 = ENG.compute(inp);
+  // Modos de sabor: la receta inicial se calcula siempre igual; «Sabor seguro» muestra una variante y
+  // «Toque final» añade lo que se pone solo en la segunda ración
+  const mode = r0.inc.size ? state.mode : 'base';
+  const fsv = mode==='sabor' ? ENG.flavorSafe(inp, r0) : null;
+  const ft = mode==='toque' ? ENG.finishTouch(inp, r0) : null;
+  const r = fsv ? fsv.r : r0;
+  lastR = r; lastMode = {mode, fsv, ft, r0};
   used = r.prot; save();
   // Despensa
   const groups=[...new Set(ING.map(i=>i.g))];
@@ -1504,6 +1701,7 @@ function render(){
         else if(r.res[i.id]) st='<span class="st res">reserva</span>';
         else if(r.must[i.id]) st='<span class="st must">imprescindible</span>';
         if(state.ovr[i.id]===0) st='<span class="st res">puesto a 0</span>';
+        if(fsv && fsv.removed.includes(i.id)) st='<span class="st res">fuera por sabor</span>';
       }
       if(state.bt && BTX(i.id) && BTX(i.id)[GROUPS.indexOf(state.bt)]==='E') st+=`<span class="st excl">${state.bt}: evitar</span>`;
       const fz = state.have.has(i.id) && state.force.has(i.id);
@@ -1512,6 +1710,7 @@ function render(){
     }).join('')}</div>`).join('');
 
   // Resumen por ración (la misma función alimenta la pantalla y el PDF)
+  document.getElementById('modeBox').innerHTML = r0.inc.size ? `<div class="modes" role="group" aria-label="Versión de la receta"><span class="mlbl">Versión de la receta</span>${MODES.map(([k,l])=>`<button type="button" data-mode="${k}" aria-pressed="${mode===k}">${l}</button>`).join('')}</div>` : '';
   document.getElementById('sum').innerHTML = r.inc.size ? summaryItems(r).map(it=>`<div class="${[it.c,it.k].filter(Boolean).join(' ')}"><b>${it.v}${it.c?` <em class="stw">${STW[it.c]}</em>`:''}</b><span>${it.l}</span>${it.r?`<span class="rng">${it.r}</span>`:''}</div>`).join('') : '';
 
   // Protagonista
@@ -1530,7 +1729,7 @@ function render(){
   // Reajuste (recuadros lila): solo tras cambiar cantidades a mano
   const f0=state.serv/2;
   const hasOvr = Object.keys(state.ovr).length>0;
-  const rb = (hasOvr || ENG.penalty(r.tot)>0.05) ? ENG.rebalance(inp, r, i=>stepOf(i,f0)/(i.q*f0)) : {};
+  const rb = (!fsv && (hasOvr || ENG.penalty(r.tot)>0.05)) ? ENG.rebalance(inp, r, i=>stepOf(i,f0)/(i.q*f0)) : {};
   lastRB = rb;
   const plan=fillPlan(r, new Set(Object.keys(rb).filter(id=>rb[id].isNew))), f=plan.f;
   let html = r.inc.size ? `<p class="how">${state.mixer==='jarra'?'Llena la jarra en este orden: así basta una sola cuchara (los frutos secos alergénicos van al final de los secos para no contaminar los demás envases, y los líquidos después de los secos). Los cítricos, al final de todo. Bate todo junto 45–60 s.':'Llena el vaso en este orden, de abajo arriba; ciérralo, dale la vuelta y bate todo junto 45–60 s.'} El cítrico protege los flavanoles aunque todo se bata a la vez. Tómalo enseguida.${state.mixer==='vaso'&&state.serv>1?' Si en tu vaso no caben '+fmt(state.serv*0.75,2).replace(/,?0+$/,'')+' L, prepara cada ración por separado con la parte proporcional de cada cantidad.':''}</p>` : '';
@@ -1557,10 +1756,25 @@ function render(){
           : 'Bájalo a '+Q(lb.to)+' (−'+Q(lb.from-lb.to)+')';
         lila = `<span class="lilatx">${txt} ${btn}</span>`;
       }
-      html+=`<li class="${m?'must':''}${state.ovr[i.id]!==undefined?' adjrow':''}${lb||ld?' lila':''}${lb&&lb.isNew?' newrow':''}"><span><span class="inm">${esc(i.name)}</span>${(lb&&lb.isNew)||(ld&&ld.isNew)?'<span class="tag opt">No estaba en la receta</span>':`<span class="tag ${m?'must':'opt'}">${m?'Imprescindible':'Opcional'}</span>`}${marks}</span>${qtyCtl(i,f)}${lila}${m?`<span class="why">${esc(m.join(' '))}</span>`:(i.hint?`<span class="why">${esc(i.hint)}</span>`:'')}${noteHTML(i)}${btHTML(i.id)}</li>`;
+      html+=`<li class="${m?'must':''}${state.ovr[i.id]!==undefined?' adjrow':''}${lb||ld?' lila':''}${lb&&lb.isNew?' newrow':''}"><span><span class="inm">${esc(i.name)}</span>${(lb&&lb.isNew)||(ld&&ld.isNew)?'<span class="tag opt">No estaba en la receta</span>':`<span class="tag ${m?'must':'opt'}">${m?'Imprescindible':'Opcional'}</span>`}${ENG.FLAT[i.id]?`<span class="mk flat" title="${esc(ENG.FLAT[i.id])}">Sabor plano</span>`:''}${marks}</span>${qtyCtl(i,f)}${lila}${m?`<span class="why">${esc(m.join(' '))}</span>`:(i.hint?`<span class="why">${esc(i.hint)}</span>`:'')}${noteHTML(i)}${btHTML(i.id)}</li>`;
     }
     html+='</ul></div>';
   });
+  if(fsv && fsv.items.length) html+=`<div class="step flav"><div class="step-h"><b>Toque de sabor</b><span>añádelo al final, antes de batir</span></div><ul class="items">${fsv.items.map(x=>`<li><span><span class="inm">${esc(x.txt)}</span> <span class="why">${esc(x.hint)}</span></span><span class="q">${esc(amtTxt(x,state.serv))}</span></li>`).join('')}</ul></div>`;
+  if(ft){
+    const who=servWho();
+    html+=`<div class="flavnote" id="touchBox"><p><b>Toque final para ${who}.</b> ${state.serv===1?'Bate la receta, sírvela y añade a tu vaso':'Bate la receta, sirve primero la ración que se toma tal cual y añade al otro vaso'}:</p><ul>${ft.items.map(x=>`<li><b>${esc(x.txt)}</b>: ${esc(amtTxt(x,1))} · ${esc(x.hint)}</li>`).join('')}</ul><p>Remueve bien o bate unos segundos. Si tienes menta o albahaca fresca, 3 o 4 hojas también le dan frescor.</p>`
+      +(ft.dropped.length?`<p>No se añade ${ft.dropped.map(x=>x.txt.toLowerCase()).join(' ni ')}: haría pasar algún recuadro de ${who} a un color peor (esta receta ya está en el límite del verde).</p>`:'')
+      +`<p class="dz">${diffTxt(r0.tot, ft.tot)||'Los indicadores apenas cambian'}${state.serv===1?'':' (solo en esa ración)'}. Ningún recuadro cambia a un color peor.</p></div>`;
+  }
+  if(mode==='sabor'){
+    if(fsv){
+      const ch=[...fsv.removed.map(id=>'sin '+ENG.nm(id)), ...fsv.halved.map(id=>'la mitad de '+ENG.nm(id)), ...fsv.raised.map(([id,m])=>'más '+ENG.nm(id)+' ('+qty(BY[id],state.serv/2,m,false)+' en vez de '+qty(BY[id],state.serv/2,1,false)+')'), ...fsv.added.map(id=>'entra '+ENG.nm(id)), ...fsv.gone.map(id=>'sale '+ENG.nm(id))];
+      const less=[...r.inc].filter(id=>(r.auto&&r.auto[id]||1) < ((r0.auto&&r0.auto[id])||1)-1e-9 && r0.inc.has(id)).map(id=>'algo menos de '+ENG.nm(id)+' para dejar sitio al azúcar del zumo');
+      ch.push(...less, ...fsv.items.map(x=>x.txt.toLowerCase()));
+      html=`<div class="flavnote"><p><b>Sabor seguro.</b> Cambios respecto a la receta inicial: ${esc(ch.join('; '))}.</p><p class="dz">${diffTxt(r0.tot, r.tot)||'Los indicadores apenas cambian'}. Ningún recuadro cambia a un color peor. «Receta inicial» vuelve a la de siempre.</p></div>`+html;
+    } else html=`<div class="flavnote"><p><b>Sabor seguro.</b> Con lo que tienes no hay ningún ajuste de sabor que no haga pasar algún recuadro a un color peor, así que se muestra la receta inicial.</p></div>`+html;
+  }
   if(r.inc.size && (hasOvr || Object.keys(rb).length)){
     const nRb=Object.keys(rb).length;
     if(nRb) html=`<div class="lilanote"><p>${hasOvr?'Has cambiado cantidades a mano.':'La receta propuesta no queda toda en verde.'} Los <b>recuadros lila</b> dicen cuánto conviene ajustar otros ingredientes para que el resumen quede en verde, o lo más cerca posible.</p><button type="button" id="applyRb">Aplicar los ajustes</button></div>`+html;
@@ -1572,7 +1786,7 @@ function render(){
   if(!r.inc.size) html='<p class="empty">Marca al menos un ingrediente para ver la receta.</p>';
 
   // Compensar el azúcar en el momento (por ejemplo, si la fruta pesa más de lo previsto)
-  const sg=ENG.suggest(inp, r);
+  const sg=fsv?[]:ENG.suggest(inp, r);
   const cb=document.getElementById('comp');
   if(sg.length && !Object.keys(rb).length){
     cb.innerHTML=`<h3>Para compensar el azúcar</h3><ul class="list sug">${sg.map(x=>{const i=BY[x.id]; const add=qty(i,f,x.to-x.from);
@@ -1585,9 +1799,11 @@ function render(){
 
   // Avisos, excluidos y reserva
   let ex='';
-  if(r.warn.length && r.inc.size){
+  const warns=[...r.warn];
+  if(mode!=='sabor' && r.inc.size){ const fl=ENG.flatness(r0); if(fl.score>=3) warns.push({lvl:'low', txt:'Puede saber plano por '+fl.reasons.join('; ')+'. Para mejorarlo sin dejar de ser saludable, prueba arriba «Toque final 2.ª ración» o «Sabor seguro».'}); }
+  if(warns.length && r.inc.size){
     const order={hi:0,mid:1,low:2,info:3};
-    ex+=`<h3>Avisos</h3><ul class="list warn">${[...r.warn].sort((a,b)=>order[a.lvl]-order[b.lvl]).map(w=>`<li class="${w.lvl}">${esc(w.txt)}</li>`).join('')}</ul>`;
+    ex+=`<h3>Avisos</h3><ul class="list warn">${warns.sort((a,b)=>order[a.lvl]-order[b.lvl]).map(w=>`<li class="${w.lvl}">${esc(w.txt)}</li>`).join('')}</ul>`;
   }
   // Recomendaciones de compra: solo si con lo que hay no se puede llegar a todo en verde
   if(r.inc.size){
@@ -1644,6 +1860,7 @@ const recipeEl=document.querySelector('.recipe');
 recipeEl.addEventListener('click',e=>{
   const b=e.target.closest('button'); if(!b) return;
   const f=state.serv/2;
+  if(b.dataset.mode){ state.mode=b.dataset.mode; save(); render(); const again=document.querySelector(`[data-mode="${b.dataset.mode}"]`); again&&again.focus(); return; }
   if(b.dataset.lila){ const id=b.dataset.lila, x=lastRB[id]||state.lilaDone[id]; if(x){ if(!state.lilaDone[id]) state.lilaDone[id]={from:x.from, isNew:x.isNew, to:x.to}; state.ovr[id]=x.to; save(); render(); } return; }
   if(b.id==='applyRb'){ for(const [id,x] of Object.entries(lastRB||{})){ state.ovr[id]=x.to; if(!state.lilaDone[id]) state.lilaDone[id]={from:x.from, isNew:x.isNew, to:x.to}; } save(); render(); return; }
   if(b.dataset.reset){ delete state.ovr[b.dataset.reset]; save(); render(); return; }
