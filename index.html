@@ -579,6 +579,7 @@ for (const i of ING){
   // Ajustes tras el test de la v5.11 (18/10/2026)
   if (i.id==='datiles'){ i.q=30; i.u='g'; i.gr=30; i.hint='≈ 1 Medjool o 2 Deglet Nour; pésalos sin hueso; se trituran mejor con lo duro'; }
   if (i.id==='garbanzos'){ i.n[1]=4.8; }
+  if (i.id==='canela'){ i.hint='Solo de Ceilán (Cinnamomum verum). La de Sumatra, Indonesia o China es cassia: tiene unas 100 veces más cumarina, y con esta cantidad diaria se puede pasar del máximo tolerable para el hígado'; }
   // Límites de grupo nuevos: especias (máx. 2), polvos extra (máx. 1); la chufa cuenta como fruto seco
   const EXTRA_CAP = {canela:['E',1],cardamomo:['E',2],vainilla:['E',3],curcuma:['E',4],nuezmoscada:['E',5],espirulina:['X',1],algarroba:['X',2],chufa:['N',9]};
   if (EXTRA_CAP[i.id]){ i.cap=EXTRA_CAP[i.id][0]; i.pr=EXTRA_CAP[i.id][1]; }
@@ -1290,7 +1291,7 @@ function touchSources(have){
   const zest = zsrc ? {id:'ralladura', src:zsrc, txt:'Ralladura de '+({naranja:'naranja',mandarina:'mandarina',limon:'limón',lima:'lima'})[zsrc]+' ecológica', q:2, u:'g', an:1, au:'cdta', hint:'solo la parte de color, sin lo blanco, que amarga'} : null;
   const spices = ['vainilla','canela','cardamomo'].filter(H).map(id=>({id:'especia', src:id,
     txt: id==='vainilla'?'Vainilla natural':id==='canela'?'Canela de Ceilán':'Cardamomo molido',
-    q: id==='canela'?0.6:0.25, u:'g', an: id==='canela'?0.25:0.125, au:'cdta', hint: id==='vainilla'?'su aroma hace que se perciba más dulce':'especia dulce: realza el dulzor'}));
+    q: id==='canela'?0.6:0.25, u:'g', an: id==='canela'?0.25:0.125, au:'cdta', hint: id==='vainilla'?'su aroma hace que se perciba más dulce':id==='canela'?'solo de Ceilán: la cassia (Sumatra, Indonesia, China) tiene mucha cumarina':'especia dulce: realza el dulzor'}));
   const salt = {id:'sal', src:'sal', txt:'Sal', q:0.1, u:'g', an:1, au:'pizca', hint:'muy pequeña (unos 40 mg de sodio por ración): atenúa el amargor y realza el dulzor'};
   return {juice, zest, spices, salt};
 }
